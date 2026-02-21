@@ -60,6 +60,10 @@ def telemetry_loop():
             if psi_data:
                 pressure, _, critical = psi_data
                 telemetry.record_pressure(pressure, critical)
+            else:
+                cgroup_pressure = sensors.read_cgroup_pressure()
+                if cgroup_pressure is not None:
+                    telemetry.record_pressure(cgroup_pressure, False)
         except Exception as e:
             logging.error(f"Error in telemetry loop: {e}", exc_info=True)
         
@@ -104,6 +108,10 @@ def governor_loop():
                 if psi_data:
                     pressure, _, critical = psi_data
                     telemetry.record_pressure(pressure, critical)
+                else:
+                    cgroup_pressure = sensors.read_cgroup_pressure()
+                    if cgroup_pressure is not None:
+                        telemetry.record_pressure(cgroup_pressure, False)
         
         except Exception as e:
             logging.error(f"Error in governor loop: {e}", exc_info=True)

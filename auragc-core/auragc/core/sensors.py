@@ -18,11 +18,24 @@ elif platform.system() == "Darwin":
 else:
     _lib_ext = ".dll"
 
+# Use glob to find the compiled library which might have architecture tags
+import glob
+
 # Try to load the compiled extension (will be built by setup.py)
-_lib_path = os.path.join(os.path.dirname(__file__), "..", "..", "src", f"libauragc_native{_lib_ext}")
-if not os.path.exists(_lib_path):
-    # Fallback: try to find it in build directory
-    _lib_path = None
+_lib_path = None
+_lib_dir = os.path.join(os.path.dirname(__file__), "..", "..")
+
+# Look in actual installed package directory first
+search_pattern = os.path.join(os.path.dirname(__file__), f"libauragc_native*{_lib_ext}")
+matches = glob.glob(search_pattern)
+
+if not matches:
+    # Also check the src build directory (for local dev)
+    search_pattern = os.path.join(_lib_dir, "src", f"libauragc_native*{_lib_ext}")
+    matches = glob.glob(search_pattern)
+
+if matches:
+    _lib_path = matches[0]
 
 # PSI Reading structure (matches C struct)
 class PSIReading(Structure):
@@ -61,6 +74,11 @@ class NativeSensors:
             
             self._lib.auragc_cgroup_is_critical.argtypes = [POINTER(c_bool)]
             self._lib.auragc_cgroup_is_critical.restype = c_int
+            
+            # New fallback sensor methods
+            if hasattr(self._lib, 'auragc_cgroup_read_pressure'):
+                self._lib.auragc_cgroup_read_pressure.argtypes = [POINTER(c_double)]
+                self._lib.auragc_cgroup_read_pressure.restype = c_int
     
     def read_psi(self) -> Optional[Tuple[float, float, bool]]:
         """Read current PSI pressure values.
@@ -95,6 +113,23 @@ class NativeSensors:
         if result < 0:
             return None
         
+        return pressure.value
+        
+    def read_cgroup_pressure(self) -> Optional[float]:
+        """Read memory usage pressure via Cgroup fallback.
+        
+        Returns:
+            float: Current pressure (0.0-1.0) if available, None otherwise.
+        """
+        if not self._lib or not hasattr(self._lib, 'auragc_cgroup_read_pressure'):
+            return None
+            
+        pressure = c_double()
+        result = self._lib.auragc_cgroup_read_pressure(ctypes.byref(pressure))
+        
+        if result != 0:
+            return None
+            
         return pressure.value
     
     def is_cgroup_critical(self) -> Optional[bool]:

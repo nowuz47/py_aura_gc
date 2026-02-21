@@ -11,7 +11,7 @@ IS_LINUX = platform.system() == "Linux"
 
 # Define the C extension
 native_extension = Extension(
-    "auragc_native",
+    "auragc.core.libauragc_native",
     sources=[
         "src/native_psi.c",
         "src/native_cgroup.c",

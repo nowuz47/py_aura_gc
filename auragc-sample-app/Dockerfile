@@ -3,13 +3,15 @@ FROM python:3.12-slim AS builder
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
+    python3-dev \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy and install wheel
-COPY wheels/auragc_core-*.whl /tmp/
-RUN pip install --no-cache-dir /tmp/auragc_core-*.whl || echo "auragc-core wheel install failed, continuing without it"
+# Copy the core library source and build the native C extension wheel
+COPY auragc-core /app/auragc-core
+RUN cd auragc-core && rm -rf dist/* && pip install build wheel setuptools && python setup.py bdist_wheel && pip install dist/*.whl --no-deps --force-reinstall
 
 # Copy requirements
 COPY auragc-sample-app/requirements.txt .

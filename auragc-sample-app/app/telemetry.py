@@ -15,6 +15,7 @@ class TelemetryCollector:
         """Initialize the telemetry collector."""
         self.start_time = time.time()
         self.gc_events = []
+        self._total_gc_events = 0
         self.pressure_readings = []
         self.max_history = 1000  # Keep last 1000 readings
     
@@ -33,6 +34,7 @@ class TelemetryCollector:
             "objects_freed": objects_freed,
         }
         self.gc_events.append(event)
+        self._total_gc_events += 1
         
         # Trim history
         if len(self.gc_events) > self.max_history:
@@ -53,9 +55,32 @@ class TelemetryCollector:
             current_counts = sum(gc.get_count())
             objects_freed = max(0, getattr(self, "_last_gc_counts", 0) - current_counts)
             
+            # Context injection: Was this forced by the Governor or natural?
+            strategy_name = "PYTHON_NATIVE"
+            try:
+                # Determine if governor triggered this recently via main application state
+                from app.main import governor
+                if governor and governor.get_last_strategy():
+                    # If pressure caused a preemptive/aggressive trigger, attribute it to governor
+                    last_strat = governor.get_last_strategy()
+                    if last_strat.value != "silent":
+                        # Only tag it if the event matches the generation targeted
+                        gen = info.get("generation", 2)
+                        if (last_strat.value == "aggressive" and gen == 2) or \
+                           (last_strat.value == "preemptive" and gen in (0,1)):
+                           strategy_name = last_strat.value.upper()
+                           
+                        # We also clear the governor's last strategy to avoid tagging natural sweeps 
+                        # that happen right after forced sweeps.
+                        governor.last_strategy = None
+            except ImportError:
+                pass
+            except Exception:
+                 pass
+            
             # Record the native event
             self.record_gc_event(
-                strategy="PYTHON_NATIVE",
+                strategy=strategy_name,
                 generation=info.get("generation", 2),
                 objects_freed=objects_freed
             )
@@ -88,9 +113,9 @@ class TelemetryCollector:
         
         # Count GC events by strategy
         strategy_counts = {}
-        total_gc_events = len(self.gc_events)
         total_objects_freed = 0
         
+        # Use full history since we can't iterate dropped arrays, but estimate roughly based on surviving window
         for event in self.gc_events:
             strategy = event["strategy"]
             strategy_counts[strategy] = strategy_counts.get(strategy, 0) + 1
@@ -103,7 +128,7 @@ class TelemetryCollector:
         
         return {
             "uptime_seconds": uptime,
-            "gc_events_total": total_gc_events,
+            "gc_events_total": self._total_gc_events,
             "gc_events_by_strategy": strategy_counts,
             "objects_freed_total": total_objects_freed,
             "average_pressure": avg_pressure,

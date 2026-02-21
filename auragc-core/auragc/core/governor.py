@@ -61,15 +61,21 @@ class Governor:
         
         # Read PSI pressure
         psi_data = self.sensors.read_psi()
-        if psi_data is None:
-            # Sensors unavailable - use SILENT to avoid unnecessary GC
-            logger.debug("PSI sensors unavailable - using SILENT strategy")
-            return GCStrategy.SILENT
         
-        some_pressure, full_pressure, psi_critical = psi_data
-        
-        # Use the higher of some/full pressure
-        current_pressure = max(some_pressure, full_pressure)
+        if psi_data is not None:
+            some_pressure, full_pressure, psi_critical = psi_data
+            current_pressure = max(some_pressure, full_pressure)
+        else:
+            # PSI unavailable - attempt Cgroup fallback
+            cgroup_pressure = self.sensors.read_cgroup_pressure()
+            if cgroup_pressure is not None:
+                current_pressure = cgroup_pressure
+                psi_critical = False
+                logger.debug(f"PSI unavailable - using Cgroup fallback pressure: {current_pressure:.2%}")
+            else:
+                # Both sensors unavailable - use SILENT to avoid unnecessary GC
+                logger.debug("Both PSI and Cgroup sensors unavailable - using SILENT strategy")
+                return GCStrategy.SILENT
         
         # Critical pressure threshold
         if current_pressure >= self.pressure_threshold_critical or psi_critical:

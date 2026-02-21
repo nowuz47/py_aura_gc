@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  baseline:
+    build:
+      context: ../..
+      dockerfile: auragc-sample-app/Dockerfile
+    container_name: auragc-baseline
+    environment:
+      - AURAGC_ENABLED=false
+      - PORT=8000
+    ports:
+      - "8001:8000"
+    mem_limit: 512m
+    cpus: 1.0
+    networks:
+      - auragc-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  auragc:
+    build:
+      context: ../..
+      dockerfile: auragc-sample-app/Dockerfile
+    container_name: auragc-enabled
+    environment:
+      - AURAGC_ENABLED=true
+      - PORT=8000
+    ports:
+      - "8002:8000"
+    mem_limit: 512m
+    cpus: 1.0
+    networks:
+      - auragc-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  locust:
+    image: locustio/locust:latest
+    container_name: auragc-locust
+    volumes:
+      - ../scripts:/mnt/locust
+    working_dir: /mnt/locust
+    command: -f locustfile.py --host=http://baseline:8000 --users 50 --spawn-rate 5
+    ports:
+      - "8089:8089"
+    networks:
+      - auragc-network
+    depends_on:
+      - baseline
+      - auragc
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    container_name: auragc-dashboard
+    volumes:
+      - ./dashboard:/app
+      - ./results:/app/results
+    ports:
+      - "8501:8501"
+    networks:
+      - auragc-network
+    depends_on:
+      - baseline
+      - auragc
+    environment:
+      - BASELINE_URL=http://baseline:8000
+      - AURAGC_URL=http://auragc:8000
+
+networks:
+  auragc-network:
+    driver: bridge

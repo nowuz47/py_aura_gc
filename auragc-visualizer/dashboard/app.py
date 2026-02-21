@@ -257,17 +257,18 @@ with col_content1:
     )
     st.plotly_chart(memory_chart, use_container_width=True)
     
-    tomb_col1, tomb_col2 = st.columns(2)
-    with tomb_col1:
-        restarts_base = st.session_state["restarts"]["baseline"]
-        st.error(f"**Baseline OOM Restarts:** {restarts_base}")
-        if restarts_base > 0:
-            st.write("🪦 " * restarts_base)
-    with tomb_col2:
-        restarts_aura = st.session_state["restarts"]["auragc"]
-        st.success(f"**AuraGC OOM Restarts:** {restarts_aura}")
-        if restarts_aura > 0:
-            st.write("🪦 " * restarts_aura)
+    if st.checkbox("Show OOM Restarts", value=True):
+        tomb_col1, tomb_col2 = st.columns(2)
+        with tomb_col1:
+            restarts_base = st.session_state["restarts"]["baseline"]
+            st.error(f"**Baseline OOM Restarts:** {restarts_base}")
+            if restarts_base > 0:
+                st.write("🪦 " * restarts_base)
+        with tomb_col2:
+            restarts_aura = st.session_state["restarts"]["auragc"]
+            st.success(f"**AuraGC OOM Restarts:** {restarts_aura}")
+            if restarts_aura > 0:
+                st.write("🪦 " * restarts_aura)
 
 # --- Test 2: Tail Latency Jitter ---
 st.markdown("---")

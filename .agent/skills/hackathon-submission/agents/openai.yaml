@@ -1,0 +1,7 @@
+interface:
+  display_name: "Hackathon Submission"
+  short_description: "Create submission docs and open a safe fork-based PR"
+  default_prompt: "Use $hackathon-submission to generate vibecoding-result.mdx and open a fork-based PR to okky-lab/vibe-coding-hackathon."
+
+policy:
+  allow_implicit_invocation: true

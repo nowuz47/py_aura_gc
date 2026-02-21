@@ -38,6 +38,28 @@ class TelemetryCollector:
         if len(self.gc_events) > self.max_history:
             self.gc_events = self.gc_events[-self.max_history:]
     
+    def gc_callback(self, phase, info):
+        """Callback for Python's native gc module.
+        
+        This captures all GC events, including those triggered naturally
+        by the Python runtime (not just those triggered by AuraGC).
+        """
+        import gc
+        
+        if phase == "start":
+            self._last_gc_counts = sum(gc.get_count())
+        elif phase == "stop":
+            # Calculate roughly how many objects were freed
+            current_counts = sum(gc.get_count())
+            objects_freed = max(0, getattr(self, "_last_gc_counts", 0) - current_counts)
+            
+            # Record the native event
+            self.record_gc_event(
+                strategy="PYTHON_NATIVE",
+                generation=info.get("generation", 2),
+                objects_freed=objects_freed
+            )
+    
     def record_pressure(self, pressure: float, critical: bool):
         """Record a pressure reading.
         

@@ -270,6 +270,87 @@ if "memory_history" not in st.session_state:
     st.session_state["memory_history"] = []
 MAX_HISTORY_POINTS = 60
 
+st.subheader("AuraGC Strategy Control")
+strategy_col1, strategy_col2 = st.columns([3, 1])
+with strategy_col1:
+    selected_strategy = st.selectbox(
+        "Select Strategy", 
+        ["Auto", "Silent", "Preemptive", "Aggressive", "Freeze"],
+        help="'Auto' lets the Governor decide based on memory pressure. Other options force the strategy."
+    )
+with strategy_col2:
+    st.write("") # Layout spacing
+    st.write("") # Layout spacing
+    if st.button("Apply Strategy", use_container_width=True):
+        try:
+            res = requests.post(f"{AURAGC_URL}/gc/strategy", params={"strategy": selected_strategy.lower()}, timeout=2)
+            if res.status_code == 200:
+                st.success(f"Strategy overriding set to **{selected_strategy}**")
+            else:
+                st.error(f"Failed to set strategy: {res.text}")
+        except Exception as e:
+            st.error(f"Error connecting to AuraGC: {e}")
+
+st.markdown("---")
+
+st.subheader("Locust Load Generator")
+st.write("Use the embedded Locust load tester to direct identical traffic to both **Baseline** and **AuraGC** simultaneously.")
+
+LOCUST_URL = "http://locust:8089"
+
+def set_locust_swarm(users, spawn_rate):
+    try:
+        data = {
+            "user_count": users,
+            "spawn_rate": spawn_rate,
+            "host": "http://localhost" # Arbitrary, since locustfile ignores it now
+        }
+        res = requests.post(f"{LOCUST_URL}/swarm", data=data, timeout=2)
+        return res.status_code == 200
+    except Exception as e:
+        st.error(f"Error connecting to Locust API: {e}")
+        return False
+
+def stop_locust():
+    try:
+        res = requests.get(f"{LOCUST_URL}/stop", timeout=2)
+        return res.status_code == 200
+    except Exception as e:
+        st.error(f"Error stopping Locust: {e}")
+        return False
+
+
+load_col1, load_col2, load_col3, load_col4 = st.columns(4)
+
+with load_col1:
+    if st.button("Stop Traffic", use_container_width=True):
+        if stop_locust():
+            st.success("Traffic stopped.")
+with load_col2:
+    if st.button("Low Traffic", use_container_width=True, type="secondary"):
+        if set_locust_swarm(5, 1):
+            st.success("Low load started (5 users)")
+with load_col3:
+    if st.button("Medium Traffic", use_container_width=True, type="secondary"):
+        if set_locust_swarm(25, 5):
+            st.success("Medium load started (25 users)")
+with load_col4:
+    if st.button("High Traffic", use_container_width=True, type="primary"):
+        if set_locust_swarm(100, 10):
+            st.success("High load started (100 users)")
+
+try:
+    locust_stats = requests.get(f"{LOCUST_URL}/stats/requests", timeout=2).json()
+    state = locust_stats.get("state", "unknown")
+    if state == "running":
+        st.info(f"Locust is **RUNNING** with {locust_stats.get('user_count', 0)} active users.")
+    elif state == "stopped" or state == "ready":
+        st.info("Locust is **IDLE**.")
+except Exception:
+    st.warning("Could not reach Locust container.")
+
+st.markdown("---")
+
 col1, col2 = st.columns(2)
 
 with col1:

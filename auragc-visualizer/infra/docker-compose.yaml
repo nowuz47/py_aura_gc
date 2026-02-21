@@ -9,7 +9,7 @@ services:
       - PORT=8000
     ports:
       - "8001:8000"
-    mem_limit: 512m
+    mem_limit: 1g
     cpus: 1.0
     networks:
       - auragc-network
@@ -29,7 +29,7 @@ services:
       - PORT=8000
     ports:
       - "8002:8000"
-    mem_limit: 512m
+    mem_limit: 1g
     cpus: 1.0
     networks:
       - auragc-network
@@ -42,10 +42,13 @@ services:
   locust:
     image: locustio/locust:latest
     container_name: auragc-locust
+    environment:
+      - BASELINE_URL=http://baseline:8000
+      - AURAGC_URL=http://auragc:8000
     volumes:
       - ../scripts:/mnt/locust
     working_dir: /mnt/locust
-    command: -f locustfile.py --host=http://baseline:8000 --users 50 --spawn-rate 5
+    command: -f locustfile.py
     ports:
       - "8089:8089"
     networks:

@@ -36,6 +36,7 @@ telemetry = TelemetryCollector()
 # Background thread control
 background_thread: threading.Thread = None
 background_running = False
+manual_strategy_override: str = None
 
 
 def telemetry_loop():
@@ -68,8 +69,14 @@ def telemetry_loop():
 
 def governor_loop():
     """Background thread that periodically runs the Governor (AuraGC mode)."""
-    global background_running
+    global background_running, manual_strategy_override
     background_running = True
+    
+    # Try importing GCStrategy for manual override
+    try:
+        from auragc.core.governor import GCStrategy
+    except ImportError:
+        GCStrategy = None
     
     logging.info("Governor thread started")
     
@@ -77,16 +84,18 @@ def governor_loop():
         try:
             if governor:
                 # Evaluate and apply strategy
-                objects_freed = governor.tick()
-                
-                # Record telemetry
-                strategy = governor.get_last_strategy()
-                if strategy and strategy.value != "silent":
-                    telemetry.record_gc_event(
-                        strategy=strategy.value,
-                        generation=2 if strategy.value == "aggressive" else (1 if strategy.value == "preemptive" else 0),
-                        objects_freed=objects_freed,
-                    )
+                # Try importing GCStrategy for manual override
+                if manual_strategy_override and GCStrategy:
+                    # Manual override
+                    try:
+                        strategy_enum = GCStrategy(manual_strategy_override)
+                        governor.apply_strategy(strategy_enum)
+                    except ValueError:
+                        # Invalid strategy, fallback to auto
+                        governor.tick()
+                else:
+                    # Auto mode
+                    governor.tick()
                 
                 # Record pressure (if sensors available)
                 from auragc.core.sensors import get_sensors
@@ -102,14 +111,19 @@ def governor_loop():
         # Sleep for 1 second before next evaluation
         time.sleep(1.0)
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     global adapter, governor, background_thread
+    import gc
     
     # Startup
     logging.info("Starting AuraGC Sample Application")
+    
+    # Register universal native GC telemetry hook
+    if hasattr(gc, 'callbacks'):
+        gc.callbacks.append(telemetry.gc_callback)
+        logging.info("Registered Python native GC telemetry hook")
     
     # Initialize adapter
     adapter = Python314Adapter()
@@ -219,6 +233,26 @@ async def allocate_static(size_mb: int = 10):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/gc/strategy")
+async def set_strategy(strategy: str = "auto"):
+    """Manually override the AuraGC strategy. 
+    Pass 'auto' to return to normal operation.
+    """
+    global manual_strategy_override
+    try:
+        if strategy.lower() == "auto":
+            manual_strategy_override = None
+        else:
+            manual_strategy_override = strategy.lower()
+        return {
+            "status": "success",
+            "message": f"Strategy set to {strategy}",
+            "manual_override": manual_strategy_override
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/stats")
 async def get_stats():
     """Get current heap and workload statistics.
@@ -235,6 +269,7 @@ async def get_stats():
             "workload": workload_stats,
             "telemetry": metrics,
             "auragc_enabled": AURAGC_AVAILABLE and governor is not None,
+            "manual_strategy": manual_strategy_override,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

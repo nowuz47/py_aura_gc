@@ -62,6 +62,11 @@ int auragc_cgroup_read_events(auragc_cgroup_memory_event_t *event) {
         return -1;
     }
     
+    /* Static state to track cumulative deltas */
+    static uint64_t last_high_count = 0;
+    static uint64_t last_max_count = 0;
+    static uint64_t last_oom_count = 0;
+    
     char line[MAX_LINE_LEN];
     uint64_t high_count = 0;
     uint64_t max_count = 0;
@@ -75,14 +80,24 @@ int auragc_cgroup_read_events(auragc_cgroup_memory_event_t *event) {
     
     fclose(fp);
     
-    /* Determine event type and criticality */
-    if (oom_count > 0) {
+    /* Calculate deltas */
+    uint64_t delta_oom = (oom_count > last_oom_count) ? (oom_count - last_oom_count) : 0;
+    uint64_t delta_max = (max_count > last_max_count) ? (max_count - last_max_count) : 0;
+    uint64_t delta_high = (high_count > last_high_count) ? (high_count - last_high_count) : 0;
+    
+    /* Update tracking state */
+    if (oom_count > last_oom_count) last_oom_count = oom_count;
+    if (max_count > last_max_count) last_max_count = max_count;
+    if (high_count > last_high_count) last_high_count = high_count;
+    
+    /* Determine event type and criticality based on DELTAS, not cumulative totals */
+    if (delta_oom > 0) {
         event->event_type = AURAGC_CGROUP_OOM;
         event->critical = true;
-    } else if (max_count > 0) {
+    } else if (delta_max > 0) {
         event->event_type = AURAGC_CGROUP_MAX;
         event->critical = true;
-    } else if (high_count > 0) {
+    } else if (delta_high > 0) {
         event->event_type = AURAGC_CGROUP_HIGH;
         event->critical = false;  /* Warning, not critical */
     } else {

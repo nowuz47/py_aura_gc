@@ -45,6 +45,7 @@ class Governor:
         # State tracking
         self.last_strategy: Optional[GCStrategy] = None
         self.consecutive_high_pressure = 0
+        self._preemptive_sweeps = 0
     
     def evaluate(self) -> GCStrategy:
         """Evaluate current memory pressure and return appropriate strategy.
@@ -72,9 +73,9 @@ class Governor:
         
         # Critical pressure threshold
         if current_pressure >= self.pressure_threshold_critical or psi_critical:
-            logger.warning(f"Critical pressure detected ({current_pressure:.2%}) - AGGRESSIVE + FREEZE")
+            logger.warning(f"Critical pressure detected ({current_pressure:.2%}) - FREEZE")
             self.consecutive_high_pressure += 1
-            return GCStrategy.AGGRESSIVE
+            return GCStrategy.FREEZE
         
         # Aggressive threshold
         if current_pressure >= self.pressure_threshold_aggressive:
@@ -111,6 +112,16 @@ class Governor:
             # Clear short-lived objects (Gen 0 and 1)
             freed_0 = self.runtime.trigger_gc(0)
             freed_1 = self.runtime.trigger_gc(1)
+            
+            # Anti-tenuring counter: Prevent Gen 2 bloat by forcing a Gen 2 sweep 
+            # every 5 preemptive hits, because manual Gen 0/1 sweeps break Native Gen 2 thresholds
+            self._preemptive_sweeps += 1
+            if self._preemptive_sweeps >= 5:
+                 freed_2 = self.runtime.trigger_gc(2)
+                 logger.debug(f"PREEMPTIVE GC (Scaled Full): freed {freed_0 + freed_1 + freed_2} objects (G0: {freed_0}, G1: {freed_1}, G2: {freed_2})")
+                 self._preemptive_sweeps = 0
+                 return freed_0 + freed_1 + freed_2
+                 
             logger.debug(f"PREEMPTIVE GC: freed {freed_0 + freed_1} objects (Gen 0: {freed_0}, Gen 1: {freed_1})")
             return freed_0 + freed_1
         

@@ -18,6 +18,18 @@ import os
 BASELINE_URL = os.getenv("BASELINE_URL", "http://localhost:8001")
 AURAGC_URL = os.getenv("AURAGC_URL", "http://localhost:8002")
 
+# Scoring constants
+MEMORY_LIMIT_MB = 512
+MEMORY_GOOD_THRESHOLD_MB = 256
+STABILITY_FULL_SECONDS = 300
+SCORE_WEIGHTS = {
+    "memory_efficiency": 0.30,
+    "gc_effectiveness": 0.25,
+    "pressure_handling": 0.15,
+    "process_health": 0.25,
+    "stability": 0.05,
+}
+
 st.set_page_config(page_title="AuraGC Dashboard", layout="wide")
 
 st.title("AuraGC Performance Dashboard")
@@ -69,44 +81,151 @@ def get_memory_usage(data):
     }
 
 
-def create_memory_chart(baseline_data, auragc_data):
-    """Create memory usage comparison chart."""
+def score_memory_efficiency(estimated_mb: float, limit_mb: float = MEMORY_LIMIT_MB) -> int:
+    """Score 0-100: 100 when below MEMORY_GOOD_THRESHOLD_MB, linear decay to 0 at limit_mb."""
+    if estimated_mb <= MEMORY_GOOD_THRESHOLD_MB:
+        return 100
+    if estimated_mb >= limit_mb:
+        return 0
+    return int(100 * (limit_mb - estimated_mb) / (limit_mb - MEMORY_GOOD_THRESHOLD_MB))
+
+
+def score_gc_effectiveness(gc_events_total: int, objects_freed_total: int) -> int:
+    """Score 0-100: based on objects freed per GC event; 50 if no events."""
+    if gc_events_total == 0:
+        return 50
+    ratio = objects_freed_total / gc_events_total
+    # Normalize: e.g. 10+ objects per event = 100, 0 = 0
+    score = min(100, int(ratio * 10))
+    return max(0, score)
+
+
+def score_pressure(average_pressure: float):
+    """Score 0-100: 100 - pressure*100. Returns None if N/A."""
+    if average_pressure is None:
+        return None
+    return max(0, min(100, int(100 - (average_pressure * 100))))
+
+
+def score_health(online: bool) -> int:
+    """Score 0-100: 100 if online, 0 if offline."""
+    return 100 if online else 0
+
+
+def score_stability(uptime_seconds: float) -> int:
+    """Score 0-100: 100 at STABILITY_FULL_SECONDS+, linear below."""
+    if uptime_seconds >= STABILITY_FULL_SECONDS:
+        return 100
+    return min(100, int(100 * uptime_seconds / STABILITY_FULL_SECONDS))
+
+
+def overall_score(components: dict, weights: dict, skip_none: bool = True) -> int:
+    """Weighted average of component scores; skip None if skip_none."""
+    total_weight = 0.0
+    weighted_sum = 0.0
+    for key, weight in weights.items():
+        val = components.get(key)
+        if val is None and skip_none:
+            continue
+        if val is not None:
+            weighted_sum += val * weight
+            total_weight += weight
+    if total_weight <= 0:
+        return 0
+    return int(weighted_sum / total_weight)
+
+
+def compute_scores(stats_data, is_auragc: bool) -> dict:
+    """Compute all component scores from stats response. Returns dict of component name -> score (or None)."""
+    online = stats_data and stats_data.get("status") == "online"
+    if not online:
+        return {
+            "memory_efficiency": 0,
+            "gc_effectiveness": 50,
+            "pressure_handling": None if not is_auragc else 0,
+            "process_health": 0,
+            "stability": 0,
+        }
+
+    data = stats_data.get("data") or {}
+    heap = data.get("heap", {})
+    telemetry = data.get("telemetry", {})
+
+    mem = get_memory_usage(stats_data)
+    estimated_mb = mem["estimated_mb"] if mem else 0
+
+    gc_total = telemetry.get("gc_events_total", 0)
+    objects_freed = telemetry.get("objects_freed_total", 0)
+    uptime = telemetry.get("uptime_seconds", 0)
+    avg_pressure = telemetry.get("average_pressure")
+
+    return {
+        "memory_efficiency": score_memory_efficiency(estimated_mb),
+        "gc_effectiveness": score_gc_effectiveness(gc_total, objects_freed),
+        "pressure_handling": score_pressure(avg_pressure) if is_auragc else None,
+        "process_health": score_health(True),
+        "stability": score_stability(uptime),
+    }
+
+
+def create_memory_chart(baseline_data, auragc_data, memory_history=None):
+    """Create memory usage comparison chart. Uses memory_history if provided for time-series."""
     fig = go.Figure()
-    
-    if baseline_data and baseline_data.get("status") == "online":
-        baseline_mem = get_memory_usage(baseline_data)
-        if baseline_mem:
+    history = memory_history or []
+
+    if len(history) > 0:
+        ts = [h["ts"] for h in history]
+        baseline_ys = [h.get("baseline_mb") for h in history]
+        auragc_ys = [h.get("auragc_mb") for h in history]
+        if any(b is not None for b in baseline_ys):
             fig.add_trace(go.Scatter(
-                x=[baseline_data["timestamp"]],
-                y=[baseline_mem["estimated_mb"]],
-                mode='lines+markers',
-                name='Baseline (Default GC)',
-                line=dict(color='red', width=2),
+                x=ts,
+                y=baseline_ys,
+                mode="lines+markers",
+                name="Baseline (Default GC)",
+                line=dict(color="red", width=2),
+                connectgaps=False,
             ))
-    
-    if auragc_data and auragc_data.get("status") == "online":
-        auragc_mem = get_memory_usage(auragc_data)
-        if auragc_mem:
+        if any(a is not None for a in auragc_ys):
             fig.add_trace(go.Scatter(
-                x=[auragc_data["timestamp"]],
-                y=[auragc_mem["estimated_mb"]],
-                mode='lines+markers',
-                name='AuraGC Enabled',
-                line=dict(color='green', width=2),
+                x=ts,
+                y=auragc_ys,
+                mode="lines+markers",
+                name="AuraGC Enabled",
+                line=dict(color="green", width=2),
+                connectgaps=False,
             ))
-    
+    else:
+        if baseline_data and baseline_data.get("status") == "online":
+            baseline_mem = get_memory_usage(baseline_data)
+            if baseline_mem:
+                fig.add_trace(go.Scatter(
+                    x=[baseline_data["timestamp"]],
+                    y=[baseline_mem["estimated_mb"]],
+                    mode="lines+markers",
+                    name="Baseline (Default GC)",
+                    line=dict(color="red", width=2),
+                ))
+        if auragc_data and auragc_data.get("status") == "online":
+            auragc_mem = get_memory_usage(auragc_data)
+            if auragc_mem:
+                fig.add_trace(go.Scatter(
+                    x=[auragc_data["timestamp"]],
+                    y=[auragc_mem["estimated_mb"]],
+                    mode="lines+markers",
+                    name="AuraGC Enabled",
+                    line=dict(color="green", width=2),
+                ))
+
     fig.update_layout(
         title="Memory Usage Over Time",
         xaxis_title="Time",
         yaxis_title="Estimated Memory (MB)",
-        hovermode='x unified',
+        hovermode="x unified",
         height=400,
     )
-    
-    # Add 512MB limit line (container limit)
-    fig.add_hline(y=512, line_dash="dash", line_color="orange", 
+    fig.add_hline(y=512, line_dash="dash", line_color="orange",
                   annotation_text="Container Limit (512MB)")
-    
     return fig
 
 
@@ -146,8 +265,10 @@ def create_gc_events_chart(baseline_data, auragc_data):
     return fig
 
 
-# Main dashboard
-col1, col2 = st.columns(2)
+# Session state for memory history (optional time-series)
+if "memory_history" not in st.session_state:
+    st.session_state["memory_history"] = []
+MAX_HISTORY_POINTS = 60
 
 with col1:
     st.subheader("Baseline (Default GC)")
@@ -185,9 +306,93 @@ with col2:
         else:
             st.error(f"Offline: {auragc_stats.get('error', 'Unknown error')}")
 
+# Append to memory history
+now = time.time()
+baseline_mb = None
+auragc_mb = None
+if baseline_stats and baseline_stats.get("status") == "online":
+    m = get_memory_usage(baseline_stats)
+    if m:
+        baseline_mb = m["estimated_mb"]
+if auragc_stats and auragc_stats.get("status") == "online":
+    m = get_memory_usage(auragc_stats)
+    if m:
+        auragc_mb = m["estimated_mb"]
+if baseline_mb is not None or auragc_mb is not None:
+    st.session_state["memory_history"].append({
+        "ts": now,
+        "baseline_mb": baseline_mb,
+        "auragc_mb": auragc_mb,
+    })
+    st.session_state["memory_history"] = st.session_state["memory_history"][-MAX_HISTORY_POINTS:]
+
+# Overall scores
+baseline_scores = compute_scores(baseline_stats, is_auragc=False)
+auragc_scores = compute_scores(auragc_stats, is_auragc=True)
+overall_baseline = overall_score(baseline_scores, SCORE_WEIGHTS)
+overall_auragc = overall_score(auragc_scores, SCORE_WEIGHTS)
+
+score_col1, score_col2 = st.columns(2)
+with score_col1:
+    st.metric("Overall Score (Baseline)", f"{overall_baseline}/100")
+    st.progress(overall_baseline / 100.0)
+with score_col2:
+    st.metric("Overall Score (AuraGC)", f"{overall_auragc}/100")
+    st.progress(overall_auragc / 100.0)
+
+# Performance breakdown
+st.subheader("Performance breakdown")
+break_col1, break_col2 = st.columns(2)
+
+with break_col1:
+    st.write("**Baseline (Default GC)**")
+    for name, key in [
+        ("Memory efficiency", "memory_efficiency"),
+        ("GC effectiveness", "gc_effectiveness"),
+        ("Pressure handling", "pressure_handling"),
+        ("Process health", "process_health"),
+        ("Stability", "stability"),
+    ]:
+        val = baseline_scores.get(key)
+        if val is None:
+            st.write(f"- {name}: N/A")
+        else:
+            st.write(f"- {name}: {val}/100")
+            st.progress(val / 100.0)
+
+with break_col2:
+    st.write("**AuraGC Enabled**")
+    for name, key in [
+        ("Memory efficiency", "memory_efficiency"),
+        ("GC effectiveness", "gc_effectiveness"),
+        ("Pressure handling", "pressure_handling"),
+        ("Process health", "process_health"),
+        ("Stability", "stability"),
+    ]:
+        val = auragc_scores.get(key)
+        if val is None:
+            st.write(f"- {name}: N/A")
+        else:
+            st.write(f"- {name}: {val}/100")
+            st.progress(val / 100.0)
+
+# Collapsible scoring guide
+with st.expander("Scoring guide"):
+    st.markdown("""
+- **Memory efficiency**: 100 when estimated memory < 256 MB; linear decay to 0 at 512 MB (container limit).
+- **GC effectiveness**: Based on objects freed per GC event; 50 if no events.
+- **Pressure handling**: 100 - (average pressure × 100). AuraGC only; Baseline N/A.
+- **Process health**: 100 if online, 0 if offline.
+- **Stability**: 100 after 300 s uptime; linear 0–100 below.
+- **Overall**: Weighted average (Memory 30%, GC 25%, Pressure 15%, Health 25%, Stability 5%). Pressure omitted for Baseline.
+    """)
+
 # Charts
 st.subheader("Memory Usage Comparison")
-memory_chart = create_memory_chart(baseline_stats, auragc_stats)
+memory_chart = create_memory_chart(
+    baseline_stats, auragc_stats,
+    memory_history=st.session_state.get("memory_history"),
+)
 st.plotly_chart(memory_chart, use_container_width=True)
 
 st.subheader("GC Events Comparison")

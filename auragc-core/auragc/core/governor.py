@@ -35,7 +35,7 @@ class Governor:
         
         # Safety Margins
         self.memory_limit_mb = 512.0
-        self.critical_threshold_mb = 400.0  # Hard trigger at ~78% of limit
+        self.critical_threshold_mb = 300.0  # Tightened safety ceiling 
         
         # PID-style State
         self.prev_blocks = 0
@@ -43,7 +43,6 @@ class Governor:
         
         # State tracking
         self.last_strategy: Optional[GCStrategy] = None
-        self._has_frozen = False
         
     def calculate_urgency(self, psi_value: float, current_blocks: int) -> float:
         """
@@ -58,18 +57,17 @@ class Governor:
         self.prev_blocks = current_blocks
 
         # 3. Component S: Static Safety Margin (Critical override)
-        # Assuming 1 block approx 100 bytes for estimation (as used in dashboard)
+        # Using 100-byte block estimation to align with Dashboard UI
         estimated_mb = (current_blocks * 100) / (1024 * 1024)
-        s_score = 1.0 if estimated_mb > self.critical_threshold_mb else 0.0
-
-        # Weighted Sum + Integral Error (Memory Debt)
-        u = (self.wp * p_score) + (self.wv * v_score)
         
-        # Force Critical if we exceed the Safety Margin
+        # Tier 2: Emergency Brake - Hard ceiling override
         if estimated_mb > self.critical_threshold_mb:
-            logger.warning(f"Safety Margin Exceeded: {estimated_mb:.1f}MB > {self.critical_threshold_mb}MB")
-            
-        return max(u, s_score)
+            logger.warning(f"EMERGENCY BRAKE: Safety Margin Exceeded ({estimated_mb:.1f}MB > 300MB). Forcing U=1.0")
+            return 1.0
+
+        # Weighted Sum (0.85 PSI + 0.15 Velocity)
+        u = (self.wp * p_score) + (self.wv * v_score)
+        return u
 
     def evaluate(self) -> GCStrategy:
         """Evaluate current memory pressure and return appropriate strategy."""
@@ -86,8 +84,9 @@ class Governor:
         # Read PSI pressure
         psi_data = self.sensors.read_psi()
         if psi_data is not None:
-            some_pressure, full_pressure, psi_critical = psi_data
-            current_pressure = max(some_pressure, full_pressure)
+            # some, full, critical
+            _, _, psi_critical = psi_data
+            current_pressure, _, _ = psi_data # Use 'some' as base
             
             # Aggressive Urgency Scaling: Immediately spike on any real pressure above 1%
             if current_pressure >= 0.01:
@@ -130,11 +129,9 @@ class Governor:
             freed = self.runtime.trigger_gc(2)
             logger.info(f"AGGRESSIVE GC: freed {freed} objects")
             
-            # Refined Immortal Branding: Call freeze immediately after survival
-            if strategy == GCStrategy.FREEZE or not self._has_frozen:
-                self.runtime.apply_freeze()
-                self._has_frozen = True
-                logger.info("FREEZE: Applied immortal branding to current objects to protect next cycle")
+            # Tier 2: Immediate Branding - Lock in survivors after emergency cycles
+            self.runtime.apply_freeze()
+            logger.info("FREEZE: Applied immortal branding to survived objects to stabilize plateau")
             return freed
             
         return 0

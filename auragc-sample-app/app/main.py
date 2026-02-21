@@ -67,8 +67,8 @@ def telemetry_loop():
         except Exception as e:
             logging.error(f"Error in telemetry loop: {e}", exc_info=True)
         
-        # Sleep for 50ms before next reading (high frequency polling)
-        time.sleep(0.05)
+        # Sleep for 10ms before next reading
+        time.sleep(0.01)
 
 
 def governor_loop():
@@ -116,8 +116,8 @@ def governor_loop():
         except Exception as e:
             logging.error(f"Error in governor loop: {e}", exc_info=True)
         
-        # Sleep for 50ms before next evaluation (high frequency polling)
-        time.sleep(0.05)
+        # Sleep for 10ms before next evaluation
+        time.sleep(0.01)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

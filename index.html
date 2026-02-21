@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AuraGC - Proactive Memory Governor for Python 3.14</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Outfit:wght@300;500;700;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: hsl(220, 20%, 5%);
+            --bg-card: hsl(220, 20%, 10%);
+            --accent-green: hsl(142, 70%, 55%);
+            --accent-green-glow: hsla(142, 70%, 55%, 0.3);
+            --accent-blue: hsl(199, 89%, 48%);
+            --text-main: hsl(0, 0%, 95%);
+            --text-dim: hsl(220, 10%, 70%);
+            --glass: rgba(255, 255, 255, 0.03);
+            --transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            line-height: 1.6;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        h1, h2, h3 {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 700;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
+        }
+
+        /* Hero Section */
+        header {
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            position: relative;
+            background: radial-gradient(circle at 50% 50%, hsla(142, 70%, 15%, 0.15) 0%, transparent 70%);
+        }
+
+        header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: 
+                linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+            background-size: 50px 50px;
+            pointer-events: none;
+        }
+
+        .hero-content {
+            z-index: 10;
+            opacity: 0;
+            transform: translateY(30px);
+            animation: fadeIn 1s forwards ease-out;
+        }
+
+        @keyframes fadeIn {
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .logo-tag {
+            background: var(--glass);
+            border: 1px solid rgba(255,255,255,0.1);
+            padding: 0.5rem 1.25rem;
+            border-radius: 100px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            color: var(--accent-green);
+            margin-bottom: 2rem;
+            display: inline-block;
+            backdrop-filter: blur(10px);
+        }
+
+        h1 {
+            font-size: clamp(3rem, 8vw, 6rem);
+            font-weight: 900;
+            line-height: 1;
+            margin-bottom: 1.5rem;
+            letter-spacing: -0.02em;
+            background: linear-gradient(to bottom right, #fff 30%, #a2a2a2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .hero-sub {
+            font-size: 1.25rem;
+            color: var(--text-dim);
+            max-width: 600px;
+            margin: 0 auto 3rem;
+        }
+
+        .cta-group {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+        }
+
+        .btn {
+            padding: 1rem 2.5rem;
+            border-radius: 12px;
+            font-weight: 700;
+            text-decoration: none;
+            transition: var(--transition);
+            display: inline-block;
+        }
+
+        .btn-primary {
+            background-color: var(--accent-green);
+            color: var(--bg-dark);
+            box-shadow: 0 10px 30px var(--accent-green-glow);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px var(--accent-green-glow);
+            filter: brightness(1.1);
+        }
+
+        .btn-secondary {
+            background-color: var(--glass);
+            color: var(--text-main);
+            border: 1px solid rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+        }
+
+        .btn-secondary:hover {
+            background-color: rgba(255,255,255,0.08);
+            border-color: rgba(255,255,255,0.2);
+        }
+
+        /* Features Section */
+        .features {
+            padding: 8rem 0;
+        }
+
+        .section-header {
+            text-align: center;
+            margin-bottom: 5rem;
+        }
+
+        .section-header h2 {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+        }
+
+        .card {
+            background-color: var(--bg-card);
+            padding: 3rem;
+            border-radius: 24px;
+            border: 1px solid rgba(255,255,255,0.05);
+            transition: var(--transition);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card:hover {
+            border-color: var(--accent-green);
+            transform: translateY(-10px);
+        }
+
+        .card::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at var(--mouse-x, 100%) var(--mouse-y, 100%), rgba(255,255,255,0.05) 0%, transparent 50%);
+            pointer-events: none;
+        }
+
+        .icon-box {
+            width: 60px;
+            height: 60px;
+            background: var(--bg-dark);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 2rem;
+            font-size: 1.5rem;
+            color: var(--accent-green);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .card h3 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .card p {
+            color: var(--text-dim);
+        }
+
+        /* Visualizer Mockup */
+        .preview {
+            padding: 5rem 0 10rem;
+            text-align: center;
+        }
+
+        .mockup {
+            background: #0d0d0d;
+            border-radius: 20px;
+            border: 1px solid rgba(255,255,255,0.1);
+            padding: 2rem;
+            box-shadow: 0 40px 100px rgba(0,0,0,0.5);
+            max-width: 1000px;
+            margin: 0 auto;
+            position: relative;
+        }
+
+        .mockup::before {
+            content: '';
+            position: absolute;
+            top: -2px;
+            left: -2px;
+            right: -2px;
+            bottom: -2px;
+            background: linear-gradient(45deg, var(--accent-green), var(--accent-blue));
+            border-radius: 22px;
+            z-index: -1;
+            opacity: 0.3;
+        }
+
+        .sawtooth {
+            width: 100%;
+            height: 300px;
+            background: repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(0,255,0,0.05) 10px, rgba(0,255,0,0.05) 20px);
+            border-bottom: 2px solid var(--accent-green);
+            position: relative;
+        }
+
+        .sawtooth-svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .sawtooth-path {
+            fill: none;
+            stroke: var(--accent-green);
+            stroke-width: 3;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            animation: draw 2s forwards;
+        }
+
+        @keyframes draw {
+            from { stroke-dasharray: 0 1000; }
+            to { stroke-dasharray: 1000 0; }
+        }
+
+        footer {
+            padding: 4rem 0;
+            text-align: center;
+            border-top: 1px solid rgba(255,255,255,0.05);
+            color: var(--text-dim);
+            font-size: 0.9rem;
+        }
+
+        .highlight {
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+
+        @media (max-width: 768px) {
+            .cta-group { flex-direction: column; }
+            h1 { font-size: 3rem; }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="container hero-content">
+            <div class="logo-tag">VIBE CODING HACKATHON 2025</div>
+            <h1>AuraGC</h1>
+            <p class="hero-sub">
+                Python 3.14를 위한 <span class="highlight">인프라 인지형</span> 가비지 컬렉션 가버너. 
+                메모리 부족(OOM)으로 인한 컨테이너 재시작을 선제적으로 방지합니다.
+            </p>
+            <div class="cta-group">
+                <a href="https://github.com/nowuz47/py_aura_gc" class="btn btn-primary">Github 원본보기</a>
+                <a href="https://github.com/nowuz47/py_aura_gc/releases/latest" class="btn btn-secondary">최신 릴리즈 v0.1.0</a>
+            </div>
+        </div>
+    </header>
+
+    <section class="features">
+        <div class="container">
+            <div class="section-header">
+                <h2>Proactive Defense System</h2>
+                <p>기존의 수동적인 GC를 넘어, 시스템 압력을 실시간으로 모니터링하여 대응합니다.</p>
+            </div>
+            <div class="grid">
+                <div class="card">
+                    <div class="icon-box">⚡</div>
+                    <h3>Native PSI Sensing</h3>
+                    <p>Linux Kernel의 Pressure Stall Information(PSI)을 C로 직접 읽어 10ms 미만의 지연시간으로 급격한 부하를 감지합니다.</p>
+                </div>
+                <div class="card">
+                    <div class="icon-box">🛡️</div>
+                    <h3>Emergency Brake</h3>
+                    <p>300MB 안전 한계점을 설정하여 컨테이너가 512MB 하드 리밋에 도달하기 전 선제적으로 Aggressive GC를 수행합니다.</p>
+                </div>
+                <div class="card">
+                    <div class="icon-box">🔒</div>
+                    <h3>Sawtooth Stability</h3>
+                    <p>생존한 객체를 즉시 Immortal Branding(Freeze) 처리하여 대규모 누수 상황에서도 메모리 안정성을 유지합니다.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="preview">
+        <div class="container">
+            <div class="section-header">
+                <h2>The Sawtooth Result</h2>
+                <p>Baseline(Red)은 반복적으로 OOM Crash가 발생하지만, AuraGC(Green)는 안정적인 톱니바퀴 곡선을 그립니다.</p>
+            </div>
+            <div class="mockup">
+                <div class="sawtooth">
+                    <svg class="sawtooth-svg" viewBox="0 0 1000 300">
+                        <path class="sawtooth-path" d="M0,280 L50,150 L100,280 L150,150 L200,280 L250,150 L300,280 L350,150 L400,280 L450,150 L500,280 L550,150 L600,280 L650,150 L700,280 L750,150 L800,280 L850,150 L900,280 L950,150 L1000,280" />
+                        <!-- Baseline crash lines -->
+                        <path d="M0,280 L100,50 L100,280 L200,50 L200,280 L300,50 L300,280" stroke="rgba(255,0,0,0.5)" stroke-width="2" stroke-dasharray="5,5" fill="none" />
+                    </svg>
+                </div>
+                <div style="margin-top: 1rem; display: flex; justify-content: space-around; font-size: 0.8rem; color: var(--text-dim);">
+                    <span>0s</span>
+                    <span>60s</span>
+                    <span>120s</span>
+                    <span>180s</span>
+                    <span>240s</span>
+                    <span>300s</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2025 AuraGC Project. 제 1회 OKKY 바이브코딩 해커톤 참가작.</p>
+        </div>
+    </footer>
+
+    <script>
+        // Card hover effect
+        document.querySelectorAll('.card').forEach(card => {
+            card.addEventListener('mousemove', e => {
+                const rect = card.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                card.style.setProperty('--mouse-x', `${x}px`);
+                card.style.setProperty('--mouse-y', `${y}px`);
+            });
+        });
+    </script>
+</body>
+</html>

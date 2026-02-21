@@ -33,19 +33,47 @@ governor: Governor = None
 workload_sim = WorkloadSimulator()
 telemetry = TelemetryCollector()
 
-# Governor thread control
-governor_thread: threading.Thread = None
-governor_running = False
+# Background thread control
+background_thread: threading.Thread = None
+background_running = False
+
+
+def telemetry_loop():
+    """Background thread that periodically collects PSI telemetry for Baseline."""
+    global background_running
+    background_running = True
+    
+    logging.info("Standalone telemetry thread started (Baseline mode)")
+    
+    # Check if native sensors are available at all
+    try:
+        from auragc.core.sensors import get_sensors
+    except ImportError:
+        logging.warning("auragc.core.sensors not available. Baseline telemetry cannot read PSI pressure.")
+        return
+
+    while background_running:
+        try:
+            sensors = get_sensors()
+            psi_data = sensors.read_psi()
+            if psi_data:
+                pressure, _, critical = psi_data
+                telemetry.record_pressure(pressure, critical)
+        except Exception as e:
+            logging.error(f"Error in telemetry loop: {e}", exc_info=True)
+        
+        # Sleep for 1 second before next reading
+        time.sleep(1.0)
 
 
 def governor_loop():
-    """Background thread that periodically runs the Governor."""
-    global governor_running
-    governor_running = True
+    """Background thread that periodically runs the Governor (AuraGC mode)."""
+    global background_running
+    background_running = True
     
     logging.info("Governor thread started")
     
-    while governor_running:
+    while background_running:
         try:
             if governor:
                 # Evaluate and apply strategy
@@ -53,7 +81,7 @@ def governor_loop():
                 
                 # Record telemetry
                 strategy = governor.get_last_strategy()
-                if strategy:
+                if strategy and strategy.value != "silent":
                     telemetry.record_gc_event(
                         strategy=strategy.value,
                         generation=2 if strategy.value == "aggressive" else (1 if strategy.value == "preemptive" else 0),
@@ -78,7 +106,7 @@ def governor_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
-    global adapter, governor, governor_thread
+    global adapter, governor, background_thread
     
     # Startup
     logging.info("Starting AuraGC Sample Application")
@@ -93,23 +121,27 @@ async def lifespan(app: FastAPI):
             logging.info("AuraGC Governor initialized")
             
             # Start governor thread
-            governor_thread = threading.Thread(target=governor_loop, daemon=True)
-            governor_thread.start()
+            background_thread = threading.Thread(target=governor_loop, daemon=True)
+            background_thread.start()
             logging.info("Governor thread started")
         except Exception as e:
             logging.error(f"Failed to initialize Governor: {e}", exc_info=True)
     else:
         logging.warning("Running without AuraGC - using default Python GC")
+        # Start standalone telemetry thread for Baseline to still monitor pressure
+        background_thread = threading.Thread(target=telemetry_loop, daemon=True)
+        background_thread.start()
+        logging.info("Standalone telemetry thread started")
     
     yield
     
     # Shutdown
     logging.info("Shutting down AuraGC Sample Application")
-    global governor_running
-    governor_running = False
+    global background_running
+    background_running = False
     
-    if governor_thread:
-        governor_thread.join(timeout=2.0)
+    if background_thread:
+        background_thread.join(timeout=2.0)
 
 
 # Create FastAPI app

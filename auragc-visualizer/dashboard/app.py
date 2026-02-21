@@ -142,7 +142,7 @@ def compute_scores(stats_data, is_auragc: bool) -> dict:
         return {
             "memory_efficiency": 0,
             "gc_effectiveness": 50,
-            "pressure_handling": None if not is_auragc else 0,
+            "pressure_handling": 0,
             "process_health": 0,
             "stability": 0,
         }
@@ -162,7 +162,7 @@ def compute_scores(stats_data, is_auragc: bool) -> dict:
     return {
         "memory_efficiency": score_memory_efficiency(estimated_mb),
         "gc_effectiveness": score_gc_effectiveness(gc_total, objects_freed),
-        "pressure_handling": score_pressure(avg_pressure) if is_auragc else None,
+        "pressure_handling": score_pressure(avg_pressure),
         "process_health": score_health(True),
         "stability": score_stability(uptime),
     }
@@ -269,6 +269,8 @@ def create_gc_events_chart(baseline_data, auragc_data):
 if "memory_history" not in st.session_state:
     st.session_state["memory_history"] = []
 MAX_HISTORY_POINTS = 60
+
+col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("Baseline (Default GC)")
@@ -398,6 +400,22 @@ st.plotly_chart(memory_chart, use_container_width=True)
 st.subheader("GC Events Comparison")
 gc_chart = create_gc_events_chart(baseline_stats, auragc_stats)
 st.plotly_chart(gc_chart, use_container_width=True)
+
+st.subheader("Performance Logs / AI Data")
+with st.expander("View Raw Telemetry & Diagnostic Data"):
+    log_col1, log_col2 = st.columns(2)
+    with log_col1:
+        st.write("**Baseline Diagnostics**")
+        if baseline_stats and baseline_stats.get("status") == "online":
+            st.json(baseline_stats.get("data", {}))
+        else:
+            st.write("Offline or Unavailable")
+    with log_col2:
+        st.write("**AuraGC Diagnostics**")
+        if auragc_stats and auragc_stats.get("status") == "online":
+            st.json(auragc_stats.get("data", {}))
+        else:
+            st.write("Offline or Unavailable")
 
 # Auto-refresh
 if st.checkbox("Auto-refresh (5s)", value=True):
